@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+
+import re
+import os
+from urllib.parse import urljoin
+import argparse
+import requests
+import sys
+
+BASE_URL = "https://api.github.com"
+
+DEFAULT_HEADERS = {
+    "Accept": "application/vnd.github.v3+json",
+}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-t", "--token", default=os.getenv("GITHUB_TOKEN"))
+    parser.add_argument("-o", "--org", action="append", default=[])
+    parser.add_argument("--url-type", choices=["https", "git", "ssh"], default="ssh")
+    parser.add_argument("-m", "--mr-config-path", default="mrconfig")
+    parser.add_argument("-a", "--archives", action="store_true", default=False)
+
+    args = parser.parse_args()
+
+    repositories = fetch_repositories(args.token, args.org, args.user, args.url_type, args.archives)
+    write_mr_config(args.mr_config_path, repositories)
+
+
+def fetch_repositories(token, orgs, users, url_type, fetch_archives):
+    headers = {
+        "Authorization": f"token {token}",
+    }
+    headers.update(DEFAULT_HEADERS)
+
+    result = {} # "name" => "url"
+
+    for org in orgs:
+        url = urljoin(BASE_URL, f"/orgs/{org}/repos")
+
+        while url is not None:
+            print(f"Fetching: {url}")
+            response = requests.get(url, headers=headers)
+            raise_http_error(response)
+            repositories = response.json()
+
+            for repository in repositories:
+                if not fetch_archives and repository["archived"]:
+                    continue
+
+                name = repository["full_name"]
+                if url_type == "https":
+                    repo_url = repository["html_url"]
+                elif url_type == "git":
+                    repo_url = repository["repo_url"]
+                elif url_type == "ssh":
+                    repo_url = repository["ssh_url"]
+                else:
+                    assert False, url_type
+
+                result[name] = repo_url
+
+            links = parse_link_header(response.headers.get("Link"))
+            url = links.get("next")
+
+    print(f"Found {len(result)} repositories")
+    return result
+
+
+def write_mr_config(mr_config_path, repositories):
+    with open(mr_config_path, "w") as fp:
+        for name, url in sorted(repositories.items()):
+            fp.write(f"[{name}]\n")
+            fp.write(f"checkout = git clone {url}\n")
+            fp.write("\n")
+
+
+def parse_link_header(header):
+    links = [line.strip() for line in header.split(",") if line.strip() != ""]
+
+    result = {}
+    for link in links:
+        m = re.match(r'^<(?P<url>.+)>; rel="(?P<rel>.+)"$', link)
+
+        url = m.group("url")
+        rel = m.group("rel")
+
+        result[rel] = url
+
+    return result
+
+
+def raise_http_error(response):
+    if not response.ok:
+        print(response.text, file=sys.stderr)
+        response.raise_for_status()
+
+
+
+if __name__ == "__main__":
+    main()
