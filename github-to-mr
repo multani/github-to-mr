@@ -24,11 +24,11 @@ def main():
 
     args = parser.parse_args()
 
-    repositories = fetch_repositories(args.token, args.org, args.user, args.url_type, args.archives)
+    repositories = fetch_repositories(args.token, args.org, args.url_type, args.archives)
     write_mr_config(args.mr_config_path, repositories)
 
 
-def fetch_repositories(token, orgs, users, url_type, fetch_archives):
+def fetch_repositories(token, orgs, url_type, fetch_archives):
     headers = {
         "Authorization": f"token {token}",
     }
